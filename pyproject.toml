@@ -1,0 +1,17 @@
+[project]
+name = "telarchy-agent-python-example"
+version = "0.1.0"
+description = "Minimal Python example: Telarchy HTTP API client and untouched-current-value strategy"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27"]
+
+[project.scripts]
+telarchy-untouched = "telarchy_example.cli:entrypoint"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["telarchy_example"]
