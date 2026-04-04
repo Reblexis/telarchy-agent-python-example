@@ -86,3 +86,21 @@ def _mnemonic_to_key_and_address(mnemonic: str) -> tuple[str, str]:
     if not pk.startswith("0x"):
         pk = "0x" + pk
     return pk, Web3.to_checksum_address(acct.address)
+
+
+def resolve_funding_wallet_address() -> str | None:
+    """
+    Same on-chain address as `telarchy-fund` (EVM_ADDRESS overrides derived key).
+
+    Returns None if no EVM_PRIVATE_KEY / TELARCHY_AGENT_WALLET_ENV / WALLET_SEED_PHRASE_FILE.
+    """
+    try:
+        _, derived = resolve_evm_private_key_and_address()
+    except ValueError:
+        return None
+    from web3 import Web3
+
+    env_addr = os.environ.get("EVM_ADDRESS", "").strip()
+    if env_addr:
+        return Web3.to_checksum_address(env_addr)
+    return derived

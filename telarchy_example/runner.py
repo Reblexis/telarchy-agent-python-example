@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from telarchy_example.balances import fetch_agent_credits, read_base_wallet_balances
 from telarchy_example.client import TelarchyClient, TelarchyApiError
 from telarchy_example.config import load_agent_runtime
 from telarchy_example.pacing import sleep_interruptible
 from telarchy_example.strategy_untouched import load_trading_state, run_untouched_on_markets
+from telarchy_example.wallet_env import resolve_funding_wallet_address
+
+
+def _format_wallet_status(
+    telarchy_url: str,
+    rpc_url: str,
+    wallet_address: str,
+) -> str:
+    try:
+        b = read_base_wallet_balances(telarchy_url, rpc_url, wallet_address)
+    except RuntimeError as e:
+        return f"wallet RPC error: {e}"
+    usdc = b["usdc"]
+    usdc_s = f"{usdc:.6f}" if usdc is not None else "—"
+    return f"wallet {wallet_address} ETH={b['eth']:.6f} USDC={usdc_s}"
 
 
 def main() -> None:
@@ -26,6 +43,8 @@ def main() -> None:
     base = Path.cwd()
     rt = load_agent_runtime(base)
     client = TelarchyClient(rt.telarchy_url, rt.api_key, rt.workspace_id)
+    rpc_url = os.environ.get("BASE_RPC_URL", "https://mainnet.base.org").strip()
+    wallet_addr = resolve_funding_wallet_address()
 
     mode = "dry-run" if rt.dry_run else "live"
     post_delay = 0.0 if rt.dry_run else rt.trade_post_delay_seconds
@@ -43,9 +62,25 @@ def main() -> None:
     )
 
     try:
+        first_poll = True
         while not stop.is_set():
             try:
                 state = load_trading_state(client, rt.agent_id)
+                credits_before = state.balance
+                if first_poll:
+                    if wallet_addr:
+                        print(
+                            f"  Opening credits={credits_before} (api) | "
+                            f"{_format_wallet_status(rt.telarchy_url, rpc_url, wallet_addr)}",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"  Opening credits={credits_before} (api) | "
+                            f"wallet not configured (set EVM_PRIVATE_KEY or TELARCHY_AGENT_WALLET_ENV)",
+                            flush=True,
+                        )
+                    first_poll = False
                 traded = run_untouched_on_markets(
                     client,
                     state.markets,
@@ -58,10 +93,20 @@ def main() -> None:
                     rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
                     should_stop=stop.is_set,
                 )
+                credits_after = fetch_agent_credits(client, rt.agent_id)
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                wallet_suffix = ""
+                if wallet_addr:
+                    wallet_suffix = " | " + _format_wallet_status(
+                        rt.telarchy_url,
+                        rpc_url,
+                        wallet_addr,
+                    )
                 print(
-                    f"[{ts}] markets={len(state.markets)} balance={state.balance} "
-                    f"placed={traded}" + (" (dry-run)" if rt.dry_run else ""),
+                    f"[{ts}] credits={credits_after} (api, after) was={credits_before} | "
+                    f"markets={len(state.markets)} placed={traded}"
+                    f"{wallet_suffix}"
+                    + (" (dry-run)" if rt.dry_run else ""),
                     flush=True,
                 )
             except TelarchyApiError as e:
