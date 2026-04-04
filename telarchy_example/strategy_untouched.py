@@ -7,10 +7,11 @@ Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` in full
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
-from telarchy_example.client import TelarchyClient
+from telarchy_example.client import TelarchyApiError, TelarchyClient
 from telarchy_example.metrics import clamp, metric_total
 
 
@@ -110,10 +111,11 @@ def execute_trade(
     cost = result.get("cost")
     cons = result.get("consensus")
     target_date = market.get("targetDate", "")
-    print(
-        f"Bet {mid}: {name} @ {target_date} -> target={target_value}, "
-        f"cost={cost}, consensus={cons}",
-    )
+    if verbose:
+        print(
+            f"Bet {mid}: {name} @ {target_date} -> target={target_value}, "
+            f"cost={cost}, consensus={cons}",
+        )
     traded_cost = float(cost) if isinstance(cost, (int, float)) else 0.0
     return TradeResult(traded=True, skipped=False, cost=traded_cost)
 
@@ -126,12 +128,15 @@ def run_untouched_on_markets(
     max_budget_per_market: float,
     dry_run: bool,
     verbose: bool,
+    post_trade_delay_s: float = 0.0,
+    rate_limit_backoff_s: float = 65.0,
 ) -> int:
     """Returns number of markets where a trade was placed (not dry-run skips)."""
     traded_count = 0
     for market in markets:
         if not isinstance(market, dict):
             continue
+        mid = market.get("id", "?")
         try:
             result = execute_trade(
                 client,
@@ -143,11 +148,31 @@ def run_untouched_on_markets(
             )
             if result.traded:
                 traded_count += 1
-        except Exception as e:
-            message = str(e)
-            if "Insufficient balance" in message:
+                if post_trade_delay_s > 0:
+                    time.sleep(post_trade_delay_s)
+        except TelarchyApiError as e:
+            msg = e.body if e.body else str(e)
+            if e.status == 429:
+                if verbose:
+                    print(
+                        f"Rate limited on {mid}; sleeping {rate_limit_backoff_s:.0f}s",
+                        file=sys.stderr,
+                    )
+                time.sleep(rate_limit_backoff_s)
+                continue
+            if e.status == 400 and "Trade too small" in msg:
+                if verbose:
+                    print(
+                        f"Skip {mid}: trade too small (try raising MAX_BUDGET_PER_MARKET).",
+                        file=sys.stderr,
+                    )
+                if post_trade_delay_s > 0:
+                    time.sleep(post_trade_delay_s)
+                continue
+            if "Insufficient balance" in msg:
                 print("Stopping: insufficient balance.", file=sys.stderr)
                 break
-            mid = market.get("id", "?")
-            print(f"Failed on {mid}: {message}", file=sys.stderr)
+            print(f"Failed on {mid}: {e}", file=sys.stderr)
+            if post_trade_delay_s > 0:
+                time.sleep(post_trade_delay_s)
     return traded_count

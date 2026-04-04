@@ -36,6 +36,8 @@ class AgentRuntime:
     max_budget_per_market: float
     poll_interval_seconds: float
     dry_run: bool
+    trade_post_delay_seconds: float
+    trade_rate_limit_backoff_seconds: float
 
 
 def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
@@ -52,6 +54,13 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
     max_budget = float(os.environ.get("MAX_BUDGET_PER_MARKET", "1"))
     poll_interval = float(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
     dry_run = os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes")
+    backoff = float(os.environ.get("TRADE_RATE_LIMIT_BACKOFF_SECONDS", "65"))
+
+    delay_raw = os.environ.get("TRADE_POST_DELAY_SECONDS")
+    if delay_raw is not None and delay_raw.strip() != "":
+        trade_post_delay = float(delay_raw)
+    else:
+        trade_post_delay = 0.0 if dry_run else 1.0
 
     agent_id, api_key = resolve_or_register(base, url)
 
@@ -63,4 +72,6 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
         max_budget_per_market=max_budget,
         poll_interval_seconds=poll_interval,
         dry_run=dry_run,
+        trade_post_delay_seconds=trade_post_delay,
+        trade_rate_limit_backoff_seconds=backoff,
     )

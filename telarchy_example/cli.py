@@ -63,6 +63,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(f"Market {args.market} not found among active markets.")
             return
 
+        post_delay = 0.0 if dry_run else rt.trade_post_delay_seconds
         traded_count = run_untouched_on_markets(
             client,
             selected,
@@ -70,6 +71,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             max_budget_per_market=rt.max_budget_per_market,
             dry_run=dry_run,
             verbose=True,
+            post_trade_delay_s=post_delay,
+            rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
         )
 
         print("Dry run complete." if dry_run else f"Placed {traded_count} trade(s).")

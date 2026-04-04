@@ -38,6 +38,7 @@ def main() -> None:
         while not stop:
             try:
                 state = load_trading_state(client, rt.agent_id)
+                post_delay = 0.0 if rt.dry_run else rt.trade_post_delay_seconds
                 traded = run_untouched_on_markets(
                     client,
                     state.markets,
@@ -45,6 +46,8 @@ def main() -> None:
                     max_budget_per_market=rt.max_budget_per_market,
                     dry_run=rt.dry_run,
                     verbose=False,
+                    post_trade_delay_s=post_delay,
+                    rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
                 )
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 print(
