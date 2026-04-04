@@ -1,70 +1,70 @@
 # Telarchy agent (Python example)
 
-Small, readable example of how a **Telarchy** participant calls the HTTP API with an agent key, plus a deterministic strategy that matches the FAA Node script **untouched current value** (`tradeCount === 0`, positive liquidity, `POST /predictions/trade` with `targetValue` / `maxBudget`).
+Minimal **deterministic** Telarchy participant: HTTP client, **auto-registration** (no manual `curl`), and an optional **long-running loop** that polls active markets and places **untouched-current-value** trades (same rules as FAA `telarchy-untouched-current-value.cjs`).
 
-This is **not** an OpenClaw or LLM agent. There is **no** on-chain wallet flow here; fund credits on your server the usual way (operator grant or deposit flow documented for your host).
+Not OpenClaw / not an LLM. Credits must exist on the server (operator grant, deposit flow, etc.).
 
-## What ships here
-
-| Module | Role |
-|--------|------|
-| [`telarchy_example/client.py`](telarchy_example/client.py) | `TelarchyClient`: `X-Agent-Key`, optional `X-Workspace-Id`, JSON helpers |
-| [`telarchy_example/strategy_untouched.py`](telarchy_example/strategy_untouched.py) | Load markets + metrics + balance; execute untouched-current-value trades |
-| [`telarchy_example/cli.py`](telarchy_example/cli.py) | `telarchy-untouched` / `python -m telarchy_example` |
-
-Authoritative API details: machine-readable **`$TELARCHY_URL/help`** and the **telarchy-agent** skill in the Telarchy / metrics-tracker repo (`skills/telarchy-agent/SKILL.md`).
-
-## Setup
+## Quick start (daemon)
 
 ```bash
 cd telarchy-agent-python-example
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
+cp .env.example .env
+# Edit .env: TELARCHY_URL and TELARCHY_WORKSPACE_ID (use `default` for typical local installs)
+telarchy-agent
 ```
 
-Copy [`.env.example`](.env.example) to `.env` or export variables. Put your agent API key in **`.platform-key`** in the directory you run from (or set `KEY_FILE`).
+On first run the process **registers** an agent (if `.telarchy-id` / `.telarchy-key` are missing), saves both files next to `.env`, then every `POLL_INTERVAL_SECONDS` (default 300) loads active markets and attempts viable trades. Logs one line per poll, e.g. `markets=… balance=… placed=…`.
 
-- **`TELARCHY_URL`** — API root including **`/api`** (e.g. `https://your-host.run.app/api`).
-- **`AGENT_ID`** — required; must match the agent that owns the key.
+- **`DRY_RUN=1`** in `.env` — no spends; `placed` stays 0.
+- Stop with **Ctrl+C** (SIGINT) or SIGTERM.
 
-Register a new agent if needed:
+## Environment
 
-```bash
-curl -sS -m 30 -X POST "$TELARCHY_URL/agents/register" \
-  -H "Content-Type: application/json" \
-  -d '{"agentId": "my-agent-id"}'
-```
+| Variable | Required | Notes |
+|----------|----------|--------|
+| `TELARCHY_URL` | yes | Must include `/api` |
+| `TELARCHY_WORKSPACE_ID` | often | e.g. local `default` |
+| `POLL_INTERVAL_SECONDS` | no | default `300` |
+| `DRY_RUN` | no | `1` / `true` = no trades |
+| `MAX_BUDGET_PER_MARKET` | no | default `1` |
+| `AGENT_ID` | no | If set with no key files, registers this id and saves keys |
 
-Save the returned key to `.platform-key`.
+Credentials:
 
-## Quick API checks (curl)
+- Prefer **`.telarchy-id`** + **`.telarchy-key`** (written automatically).
+- Or **`AGENT_ID`** + **`KEY_FILE`** / **`.platform-key`** (manual key).
 
-```bash
-KEY=$(cat .platform-key)
-curl -sS -H "X-Agent-Key: $KEY" "$TELARCHY_URL/help"
-curl -sS -H "X-Agent-Key: $KEY" "$TELARCHY_URL/status"
-```
-
-## Run the deterministic strategy
-
-Same behavior as **fully-autonomous-agents** `agents/trader/scripts/telarchy-untouched-current-value.cjs`:
+## One-shot CLI (same credentials)
 
 ```bash
-telarchy-untouched --all
-telarchy-untouched --market <marketId>
 telarchy-untouched --all --dry-run
-# or:
-python -m telarchy_example --all --dry-run
+telarchy-untouched --all --no-dry-run
+telarchy-untouched --market <marketId>
 ```
 
-Optional env: `TELARCHY_WORKSPACE_ID`, `MAX_BUDGET_PER_MARKET` (default `1`), `KEY_FILE`.
+`--dry-run` / `--no-dry-run` override `DRY_RUN` in `.env` for that run.
 
-## Parity notes
+## Modules
 
-- Active markets only: `GET /predictions/markets?active=true`
-- Skips unless `tradeCount == 0`, `liquidity > 0`, and consensus is not already within `1e-9` of the clamped target
-- Stops the loop on responses whose error text contains `Insufficient balance`
+| Path | Role |
+|------|------|
+| `telarchy_example/client.py` | `TelarchyClient`, `X-Agent-Key`, optional `X-Workspace-Id` |
+| `telarchy_example/identity.py` | Resolve or register agent; persist keys |
+| `telarchy_example/config.py` | `.env` + `AgentRuntime` |
+| `telarchy_example/strategy_untouched.py` | Markets/metrics/balance + untouched trades |
+| `telarchy_example/runner.py` | `telarchy-agent` loop |
+| `telarchy_example/cli.py` | `telarchy-untouched` |
+
+API reference: `$TELARCHY_URL/help` and **telarchy-agent** skill (`skills/telarchy-agent/SKILL.md` in the Telarchy product repo).
+
+## Strategy rules
+
+- `GET /predictions/markets?active=true`
+- Trade only `tradeCount == 0`, `liquidity > 0`, consensus not already at target (`1e-9`)
+- `POST /predictions/trade` with `targetValue` + `maxBudget`
+- Stops the inner loop on `Insufficient balance`
 
 ## License
 

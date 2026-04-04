@@ -6,6 +6,7 @@ Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` in full
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,18 +53,21 @@ def execute_trade(
     *,
     max_budget_per_market: float,
     dry_run: bool,
+    verbose: bool = True,
 ) -> TradeResult:
     if "id" not in market:
         raise ValueError("market missing id")
     mid = market["id"]
     trade_count = market.get("tradeCount")
     if trade_count != 0:
-        print(f"Skip {mid}: already traded ({trade_count}).")
+        if verbose:
+            print(f"Skip {mid}: already traded ({trade_count}).")
         return TradeResult(traded=False, skipped=True)
 
     liq = market.get("liquidity")
     if not (isinstance(liq, (int, float)) and liq > 0):
-        print(f"Skip {mid}: no liquidity.")
+        if verbose:
+            print(f"Skip {mid}: no liquidity.")
         return TradeResult(traded=False, skipped=True)
 
     metric_id = market.get("metricId")
@@ -78,15 +82,17 @@ def execute_trade(
     )
     consensus = market.get("consensus")
     if isinstance(consensus, (int, float)) and abs(float(consensus) - target_value) < 1e-9:
-        print(f"Skip {mid}: consensus already at target {target_value}.")
+        if verbose:
+            print(f"Skip {mid}: consensus already at target {target_value}.")
         return TradeResult(traded=False, skipped=True)
 
     name = market.get("metricName", "")
     if dry_run:
-        print(
-            f"Dry run {mid}: {name} -> target={target_value}, "
-            f"maxBudget={max_budget_per_market}",
-        )
+        if verbose:
+            print(
+                f"Dry run {mid}: {name} -> target={target_value}, "
+                f"maxBudget={max_budget_per_market}",
+            )
         return TradeResult(traded=False, skipped=True)
 
     result = client.request(
@@ -110,3 +116,38 @@ def execute_trade(
     )
     traded_cost = float(cost) if isinstance(cost, (int, float)) else 0.0
     return TradeResult(traded=True, skipped=False, cost=traded_cost)
+
+
+def run_untouched_on_markets(
+    client: TelarchyClient,
+    markets: list[dict[str, Any]],
+    metrics_by_id: dict[str, dict[str, Any]],
+    *,
+    max_budget_per_market: float,
+    dry_run: bool,
+    verbose: bool,
+) -> int:
+    """Returns number of markets where a trade was placed (not dry-run skips)."""
+    traded_count = 0
+    for market in markets:
+        if not isinstance(market, dict):
+            continue
+        try:
+            result = execute_trade(
+                client,
+                market,
+                metrics_by_id,
+                max_budget_per_market=max_budget_per_market,
+                dry_run=dry_run,
+                verbose=verbose,
+            )
+            if result.traded:
+                traded_count += 1
+        except Exception as e:
+            message = str(e)
+            if "Insufficient balance" in message:
+                print("Stopping: insufficient balance.", file=sys.stderr)
+                break
+            mid = market.get("id", "?")
+            print(f"Failed on {mid}: {message}", file=sys.stderr)
+    return traded_count
