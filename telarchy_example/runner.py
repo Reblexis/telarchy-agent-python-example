@@ -9,12 +9,16 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
+
 from telarchy_example.balances import fetch_agent_credits, read_base_wallet_balances
 from telarchy_example.client import TelarchyClient, TelarchyApiError
 from telarchy_example.config import load_agent_runtime
 from telarchy_example.pacing import sleep_interruptible
 from telarchy_example.strategy_untouched import load_trading_state, run_untouched_on_markets
 from telarchy_example.wallet_env import resolve_funding_wallet_address
+
+_CONNECT_RETRY_S = 30.0
 
 
 def _format_wallet_status(
@@ -41,7 +45,24 @@ def main() -> None:
     signal.signal(signal.SIGTERM, handle_stop)
 
     base = Path.cwd()
-    rt = load_agent_runtime(base)
+
+    # Retry until the server is reachable (e.g. starting before the server is up)
+    rt = None
+    while not stop.is_set():
+        try:
+            rt = load_agent_runtime(base)
+            break
+        except httpx.TransportError as e:
+            print(
+                f"[error] connection during startup: {e}; retrying in {_CONNECT_RETRY_S:g}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            if sleep_interruptible(_CONNECT_RETRY_S, stop.is_set):
+                return
+    if rt is None:
+        return
+
     client = TelarchyClient(rt.telarchy_url, rt.api_key, rt.workspace_id)
     rpc_url = os.environ.get("BASE_RPC_URL", "https://mainnet.base.org").strip()
     wallet_addr = resolve_funding_wallet_address()
@@ -92,12 +113,14 @@ def main() -> None:
                     client,
                     state.markets,
                     state.metrics_by_id,
+                    agent_position_market_ids=state.agent_position_market_ids,
                     max_budget_per_market=rt.max_budget_per_market,
                     dry_run=rt.dry_run,
                     verbose=False,
                     log_bets=True,
                     log_skip_substrings=rt.log_skip_metric_substrings,
                     seed_virgin_midpoint=rt.seed_virgin_midpoint,
+                    retrade_out_of_consensus=rt.retrade_out_of_consensus,
                     post_trade_delay_s=post_delay,
                     rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
                     should_stop=stop.is_set,
@@ -118,6 +141,8 @@ def main() -> None:
                     + (" (dry-run)" if rt.dry_run else ""),
                     flush=True,
                 )
+            except httpx.TransportError as e:
+                print(f"[error] connection: {e}", file=sys.stderr, flush=True)
             except TelarchyApiError as e:
                 print(f"[error] API: {e}", file=sys.stderr, flush=True)
             except (OSError, RuntimeError, TypeError, ValueError) as e:

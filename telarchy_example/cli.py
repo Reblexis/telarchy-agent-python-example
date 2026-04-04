@@ -68,6 +68,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             client,
             selected,
             state.metrics_by_id,
+            agent_position_market_ids=state.agent_position_market_ids,
             max_budget_per_market=rt.max_budget_per_market,
             dry_run=dry_run,
             verbose=True,
@@ -75,6 +76,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
             log_skip_substrings=rt.log_skip_metric_substrings,
             seed_virgin_midpoint=rt.seed_virgin_midpoint,
+            retrade_out_of_consensus=rt.retrade_out_of_consensus,
         )
 
         print("Dry run complete." if dry_run else f"Placed {traded_count} trade(s).")

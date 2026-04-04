@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ def load_env_file(path: Path) -> None:
         if not trimmed or trimmed.startswith("#"):
             continue
         if "=" not in trimmed:
+            logging.warning("Skipping malformed .env line: %r", trimmed)
             continue
         key, raw_value = trimmed.split("=", 1)
         key = key.strip()
@@ -40,6 +42,7 @@ class AgentRuntime:
     trade_rate_limit_backoff_seconds: float
     log_skip_metric_substrings: tuple[str, ...]
     seed_virgin_midpoint: bool
+    retrade_out_of_consensus: bool
 
 
 def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
@@ -72,6 +75,9 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
     seed_raw = os.environ.get("SEED_VIRGIN_MIDPOINT", "1").strip().lower()
     seed_virgin = seed_raw not in ("0", "false", "no", "off")
 
+    retrade_raw = os.environ.get("RETRADE_OUT_OF_CONSENSUS", "0").strip().lower()
+    retrade = retrade_raw in ("1", "true", "yes", "on")
+
     agent_id, api_key = resolve_or_register(base, url)
 
     return AgentRuntime(
@@ -86,4 +92,5 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
         trade_rate_limit_backoff_seconds=backoff,
         log_skip_metric_substrings=log_skip_substrs,
         seed_virgin_midpoint=seed_virgin,
+        retrade_out_of_consensus=retrade,
     )
