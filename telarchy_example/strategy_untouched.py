@@ -1,8 +1,9 @@
 """
 Deterministic strategy: untouched markets only, target = current metric total.
 
-When the metric equals the virgin LMSR midpoint, targetValue trades are size zero; optional seed uses
-POST {direction, amount} (budget) to buy ``higher`` shares so the market records a trade.
+When the metric equals the virgin LMSR midpoint, targetValue trades are size zero; optional seed splits
+``MAX_BUDGET_PER_MARKET`` across a ``higher`` then ``lower`` budget buy so consensus stays near the
+midpoint while the market records trades.
 
 Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` except for that seed path.
 """
@@ -10,6 +11,7 @@ Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` except 
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Any
@@ -170,10 +172,12 @@ def execute_trade(
     if virgin_mid and implied_mid is not None:
         if dry_run:
             if show_bet:
+                half = max_budget_per_market / 2.0
+                rest = max_budget_per_market - half
                 print(
                     f"Dry run {mid}: {name} @ {target_date} -> virgin midpoint={implied_mid} "
-                    f"equals target={target_value}; would SEED buy higher "
-                    f"budget={max_budget_per_market} (SEED_VIRGIN_MIDPOINT)",
+                    f"equals target={target_value}; would SEED higher budget={half}, "
+                    f"lower budget={rest} (keep ~midpoint, SEED_VIRGIN_MIDPOINT)",
                     flush=True,
                 )
             return TradeResult(traded=False, skipped=True)
@@ -181,34 +185,54 @@ def execute_trade(
             if show_bet or _wants_skip_log(verbose, name, log_skip_substrings):
                 print(
                     f"Skip {mid}: midpoint={implied_mid} equals target={target_value} "
-                    f"(zero targetValue trade); set SEED_VIRGIN_MIDPOINT=1 to open with directional buy.",
+                    f"(zero targetValue trade); set SEED_VIRGIN_MIDPOINT=1 to open with split higher/lower buy.",
                     flush=True,
                 )
             return TradeResult(traded=False, skipped=True)
-        result = client.request(
+        half_budget = max_budget_per_market / 2.0
+        lower_budget = max_budget_per_market - half_budget
+        res_hi = client.request(
             "POST",
             "/predictions/trade",
             {
                 "marketId": mid,
                 "direction": "higher",
-                "amount": max_budget_per_market,
+                "amount": half_budget,
             },
         )
-        if not isinstance(result, dict):
-            raise TypeError("expected dict from POST /predictions/trade")
-        cost = result.get("cost")
-        cons = result.get("consensus")
-        shr = result.get("shares")
+        if not isinstance(res_hi, dict):
+            raise TypeError("expected dict from POST /predictions/trade (seed higher)")
+        time.sleep(0.25)
+        res_lo = client.request(
+            "POST",
+            "/predictions/trade",
+            {
+                "marketId": mid,
+                "direction": "lower",
+                "amount": lower_budget,
+            },
+        )
+        if not isinstance(res_lo, dict):
+            raise TypeError("expected dict from POST /predictions/trade (seed lower)")
+        c_hi = res_hi.get("cost")
+        c_lo = res_lo.get("cost")
+        cons = res_lo.get("consensus")
+        sh_hi = res_hi.get("shares")
+        sh_lo = res_lo.get("shares")
+        cost_sum = 0.0
+        for c in (c_hi, c_lo):
+            if isinstance(c, (int, float)):
+                cost_sum += float(c)
         if show_bet:
             print(
-                f"Bet {mid}: {name} @ {target_date} -> SEED higher "
+                f"Bet {mid}: {name} @ {target_date} -> SEED higher+lower "
                 f"(midpoint deadlock: target={target_value} mid={implied_mid}), "
-                f"budget={max_budget_per_market}, current={pre_consensus}, liquidity={liq_display}, "
-                f"shares={shr}, cost={cost}, consensus={cons}",
+                f"budgets={half_budget}+{lower_budget}, current={pre_consensus}, liquidity={liq_display}, "
+                f"higher shares={sh_hi} cost={c_hi} | lower shares={sh_lo} cost={c_lo} | "
+                f"total_cost={cost_sum} consensus={cons}",
                 flush=True,
             )
-        traded_cost = float(cost) if isinstance(cost, (int, float)) else 0.0
-        return TradeResult(traded=True, skipped=False, cost=traded_cost)
+        return TradeResult(traded=True, skipped=False, cost=cost_sum)
 
     if dry_run:
         if show_bet:

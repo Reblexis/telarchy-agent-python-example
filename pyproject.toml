@@ -1,6 +1,6 @@
 [project]
 name = "telarchy-agent-python-example"
-version = "0.4.0"
+version = "0.4.1"
 description = "Minimal Python example: Telarchy HTTP API client and untouched-current-value strategy"
 readme = "README.md"
 requires-python = ">=3.10"
