@@ -30,6 +30,10 @@ class TelarchyClient:
         self._workspace_id = workspace_id
         self._http = httpx.Client(timeout=timeout_s)
 
+    @property
+    def base_url(self) -> str:
+        return self._base
+
     def close(self) -> None:
         self._http.close()
 

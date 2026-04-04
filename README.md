@@ -2,7 +2,7 @@
 
 Minimal **deterministic** Telarchy participant: HTTP client, **auto-registration** (no manual `curl`), and an optional **long-running loop** that polls active markets and places **untouched-current-value** trades (same rules as FAA `telarchy-untouched-current-value.cjs`).
 
-Not OpenClaw / not an LLM. Credits must exist on the server (operator grant, deposit flow, etc.).
+Not OpenClaw / not an LLM. Credits can come from **USDC on Base** (`telarchy-fund`), an operator **admin credit**, or any other flow your host supports.
 
 ## Quick start (daemon)
 
@@ -46,6 +46,33 @@ telarchy-untouched --market <marketId>
 
 `--dry-run` / `--no-dry-run` override `DRY_RUN` in `.env` for that run.
 
+## Buy credits with USDC (`telarchy-fund`)
+
+Uses the same **Telarchy URL**, **workspace id**, and **agent key** as the daemon (from `.env` + `.telarchy-*` files). Flow:
+
+1. `GET /agents/deposit-address` — treasury + USDC contract on **Base**.
+2. `GET /status` (authenticated) — `creditValueUsd` to size the transfer.
+3. On-chain **ERC-20 USDC** `transfer` from your EVM wallet to the treasury.
+4. `POST /agents/{agentId}/deposit` with `{ "txHash": "0x…" }` — server verifies the transfer and mints credits.
+
+```bash
+# In .env set at least: EVM_PRIVATE_KEY, CREDITS_TO_PURCHASE (and the usual TELARCHY_* vars)
+telarchy-fund
+# or override amount once:
+telarchy-fund --credits 25
+```
+
+| Variable | Required for `telarchy-fund` | Notes |
+|----------|-------------------------------|--------|
+| `EVM_PRIVATE_KEY` | yes | `0x…` — wallet must hold enough **USDC on Base** and a small amount of **ETH on Base** for gas |
+| `CREDITS_TO_PURCHASE` or `--credits` | yes | Minimum credits; USDC sent = `ceil(credits × creditValueUsd × (1 + fee/100))` with 6 dp |
+| `EVM_ADDRESS` | no | If set, must match the address derived from the private key |
+| `BASE_RPC_URL` | no | default `https://mainnet.base.org` |
+| `BASE_CHAIN_ID` | no | default `8453` (Base mainnet) |
+| `DEPOSIT_BUY_FEE_PERCENT` | no | default `0`; set to match server economy if admins changed **buy fee** (not shown on `GET /status`) |
+
+If the server has no treasury, `GET /agents/deposit-address` returns **503** and funding is unavailable on that host.
+
 ## Modules
 
 | Path | Role |
@@ -56,6 +83,8 @@ telarchy-untouched --market <marketId>
 | `telarchy_example/strategy_untouched.py` | Markets/metrics/balance + untouched trades |
 | `telarchy_example/runner.py` | `telarchy-agent` loop |
 | `telarchy_example/cli.py` | `telarchy-untouched` |
+| `telarchy_example/usdc_deposit.py` | Treasury fetch, USDC transfer, `POST …/deposit` |
+| `telarchy_example/fund_cli.py` | `telarchy-fund` |
 
 API reference: `$TELARCHY_URL/help` and **telarchy-agent** skill (`skills/telarchy-agent/SKILL.md` in the Telarchy product repo).
 

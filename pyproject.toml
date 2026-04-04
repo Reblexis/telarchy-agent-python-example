@@ -1,13 +1,14 @@
 [project]
 name = "telarchy-agent-python-example"
-version = "0.2.0"
+version = "0.3.0"
 description = "Minimal Python example: Telarchy HTTP API client and untouched-current-value strategy"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["httpx>=0.27"]
+dependencies = ["httpx>=0.27", "web3>=6.0"]
 
 [project.scripts]
 telarchy-agent = "telarchy_example.runner:entrypoint"
+telarchy-fund = "telarchy_example.fund_cli:entrypoint"
 telarchy-untouched = "telarchy_example.cli:entrypoint"
 
 [build-system]
