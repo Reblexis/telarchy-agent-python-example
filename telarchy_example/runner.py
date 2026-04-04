@@ -53,6 +53,7 @@ def main() -> None:
                     max_budget_per_market=rt.max_budget_per_market,
                     dry_run=rt.dry_run,
                     verbose=False,
+                    log_bets=True,
                     post_trade_delay_s=post_delay,
                     rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
                     should_stop=stop.is_set,

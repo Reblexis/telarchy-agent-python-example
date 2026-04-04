@@ -56,7 +56,10 @@ def execute_trade(
     max_budget_per_market: float,
     dry_run: bool,
     verbose: bool = True,
+    log_bets: bool | None = None,
 ) -> TradeResult:
+    show_bet = verbose if log_bets is None else log_bets
+
     if "id" not in market:
         raise ValueError("market missing id")
     mid = market["id"]
@@ -90,10 +93,11 @@ def execute_trade(
 
     name = market.get("metricName", "")
     if dry_run:
-        if verbose:
+        if show_bet:
             print(
                 f"Dry run {mid}: {name} -> target={target_value}, "
                 f"maxBudget={max_budget_per_market}",
+                flush=True,
             )
         return TradeResult(traded=False, skipped=True)
 
@@ -112,10 +116,11 @@ def execute_trade(
     cost = result.get("cost")
     cons = result.get("consensus")
     target_date = market.get("targetDate", "")
-    if verbose:
+    if show_bet:
         print(
             f"Bet {mid}: {name} @ {target_date} -> target={target_value}, "
             f"cost={cost}, consensus={cons}",
+            flush=True,
         )
     traded_cost = float(cost) if isinstance(cost, (int, float)) else 0.0
     return TradeResult(traded=True, skipped=False, cost=traded_cost)
@@ -132,6 +137,7 @@ def run_untouched_on_markets(
     post_trade_delay_s: float = 0.0,
     rate_limit_backoff_s: float = 65.0,
     should_stop: Callable[[], bool] | None = None,
+    log_bets: bool | None = None,
 ) -> int:
     """Returns number of markets where a trade was placed (not dry-run skips)."""
     traded_count = 0
@@ -149,6 +155,7 @@ def run_untouched_on_markets(
                 max_budget_per_market=max_budget_per_market,
                 dry_run=dry_run,
                 verbose=verbose,
+                log_bets=log_bets,
             )
             if result.traded:
                 traded_count += 1
