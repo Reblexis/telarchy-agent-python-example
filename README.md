@@ -56,7 +56,7 @@ Uses the same **Telarchy URL**, **workspace id**, and **agent key** as the daemo
 4. `POST /agents/{agentId}/deposit` with `{ "txHash": "0x…" }` — server verifies the transfer and mints credits.
 
 ```bash
-# In .env set at least: EVM_PRIVATE_KEY, CREDITS_TO_PURCHASE (and the usual TELARCHY_* vars)
+# In .env: TELARCHY_* + either EVM_PRIVATE_KEY or TELARCHY_AGENT_WALLET_ENV, and CREDITS_TO_PURCHASE or --credits
 telarchy-fund
 # or override amount once:
 telarchy-fund --credits 25
@@ -64,7 +64,9 @@ telarchy-fund --credits 25
 
 | Variable | Required for `telarchy-fund` | Notes |
 |----------|-------------------------------|--------|
-| `EVM_PRIVATE_KEY` | yes | `0x…` — wallet must hold enough **USDC on Base** and a small amount of **ETH on Base** for gas |
+| `EVM_PRIVATE_KEY` | one of three | `0x…` — wallet must hold **USDC on Base** + **ETH on Base** for gas |
+| `TELARCHY_AGENT_WALLET_ENV` | one of three | Path to OpenClaw/FAA workspace `.env` with `WALLET_SEED_PHRASE`; derives Base at **`m/44'/60'/0'/0/0`** (same as `send-usdc.js`) |
+| `WALLET_SEED_PHRASE_FILE` | one of three | File with `WALLET_SEED_PHRASE=…` (or mnemonic-only lines) |
 | `CREDITS_TO_PURCHASE` or `--credits` | yes | Minimum credits; USDC sent = `ceil(credits × creditValueUsd × (1 + fee/100))` with 6 dp |
 | `EVM_ADDRESS` | no | If set, must match the address derived from the private key |
 | `BASE_RPC_URL` | no | default `https://mainnet.base.org` |
@@ -85,6 +87,7 @@ If the server has no treasury, `GET /agents/deposit-address` returns **503** and
 | `telarchy_example/cli.py` | `telarchy-untouched` |
 | `telarchy_example/usdc_deposit.py` | Treasury fetch, USDC transfer, `POST …/deposit` |
 | `telarchy_example/fund_cli.py` | `telarchy-fund` |
+| `telarchy_example/wallet_env.py` | Mnemonic / OpenClaw `.env` → EVM key |
 
 API reference: `$TELARCHY_URL/help` and **telarchy-agent** skill (`skills/telarchy-agent/SKILL.md` in the Telarchy product repo).
 

@@ -9,6 +9,7 @@ import sys
 from telarchy_example.client import TelarchyApiError, TelarchyClient
 from telarchy_example.config import load_agent_runtime
 from telarchy_example.usdc_deposit import purchase_credits_with_usdc
+from telarchy_example.wallet_env import resolve_evm_private_key_and_address
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -37,12 +38,8 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(1)
         credits = int(raw)
 
-    pk = os.environ.get("EVM_PRIVATE_KEY", "").strip()
-    if not pk:
-        print("Fatal: EVM_PRIVATE_KEY is required in .env", file=sys.stderr)
-        raise SystemExit(1)
-
-    addr = os.environ.get("EVM_ADDRESS", "").strip() or None
+    pk, derived_addr = resolve_evm_private_key_and_address()
+    addr = (os.environ.get("EVM_ADDRESS", "").strip() or derived_addr)
     rpc = os.environ.get("BASE_RPC_URL", "https://mainnet.base.org").strip()
     chain_id = int(os.environ.get("BASE_CHAIN_ID", "8453"))
     fee_pct = float(os.environ.get("DEPOSIT_BUY_FEE_PERCENT", "0"))
