@@ -7,11 +7,12 @@ Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` in full
 from __future__ import annotations
 
 import sys
-import time
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
 from telarchy_example.client import TelarchyApiError, TelarchyClient
+from telarchy_example.pacing import sleep_interruptible
 from telarchy_example.metrics import clamp, metric_total
 
 
@@ -130,10 +131,13 @@ def run_untouched_on_markets(
     verbose: bool,
     post_trade_delay_s: float = 0.0,
     rate_limit_backoff_s: float = 65.0,
+    should_stop: Callable[[], bool] | None = None,
 ) -> int:
     """Returns number of markets where a trade was placed (not dry-run skips)."""
     traded_count = 0
     for market in markets:
+        if should_stop is not None and should_stop():
+            break
         if not isinstance(market, dict):
             continue
         mid = market.get("id", "?")
@@ -148,8 +152,8 @@ def run_untouched_on_markets(
             )
             if result.traded:
                 traded_count += 1
-                if post_trade_delay_s > 0:
-                    time.sleep(post_trade_delay_s)
+                if sleep_interruptible(post_trade_delay_s, should_stop):
+                    return traded_count
         except TelarchyApiError as e:
             msg = e.body if e.body else str(e)
             if e.status == 429:
@@ -158,7 +162,8 @@ def run_untouched_on_markets(
                         f"Rate limited on {mid}; sleeping {rate_limit_backoff_s:.0f}s",
                         file=sys.stderr,
                     )
-                time.sleep(rate_limit_backoff_s)
+                if sleep_interruptible(rate_limit_backoff_s, should_stop):
+                    return traded_count
                 continue
             if e.status == 400 and "Trade too small" in msg:
                 if verbose:
@@ -166,13 +171,13 @@ def run_untouched_on_markets(
                         f"Skip {mid}: trade too small (try raising MAX_BUDGET_PER_MARKET).",
                         file=sys.stderr,
                     )
-                if post_trade_delay_s > 0:
-                    time.sleep(post_trade_delay_s)
+                if sleep_interruptible(post_trade_delay_s, should_stop):
+                    return traded_count
                 continue
             if "Insufficient balance" in msg:
                 print("Stopping: insufficient balance.", file=sys.stderr)
                 break
             print(f"Failed on {mid}: {e}", file=sys.stderr)
-            if post_trade_delay_s > 0:
-                time.sleep(post_trade_delay_s)
+            if sleep_interruptible(post_trade_delay_s, should_stop):
+                return traded_count
     return traded_count
