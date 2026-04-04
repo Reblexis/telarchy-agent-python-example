@@ -38,6 +38,7 @@ class AgentRuntime:
     dry_run: bool
     trade_post_delay_seconds: float
     trade_rate_limit_backoff_seconds: float
+    log_skip_metric_substrings: tuple[str, ...]
 
 
 def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
@@ -62,6 +63,11 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
     else:
         trade_post_delay = 0.0 if dry_run else 1.0
 
+    skip_raw = os.environ.get("LOG_SKIPS_FOR_METRIC_SUBSTR", "").strip()
+    log_skip_substrs = tuple(
+        s.strip().lower() for s in skip_raw.split(",") if s.strip()
+    )
+
     agent_id, api_key = resolve_or_register(base, url)
 
     return AgentRuntime(
@@ -74,4 +80,5 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
         dry_run=dry_run,
         trade_post_delay_seconds=trade_post_delay,
         trade_rate_limit_backoff_seconds=backoff,
+        log_skip_metric_substrings=log_skip_substrs,
     )

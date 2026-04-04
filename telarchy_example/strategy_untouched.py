@@ -16,6 +16,46 @@ from telarchy_example.pacing import sleep_interruptible
 from telarchy_example.metrics import clamp, metric_total
 
 
+def _wants_skip_log(verbose: bool, metric_name: str, substrings: tuple[str, ...]) -> bool:
+    if verbose:
+        return True
+    if not substrings:
+        return False
+    ln = (metric_name or "").lower()
+    return any(s in ln for s in substrings)
+
+
+def _trade_count_is_zero(trade_count: Any) -> bool:
+    if trade_count is None:
+        return True
+    try:
+        return int(float(trade_count)) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _liquidity_positive(liquidity: Any) -> bool:
+    try:
+        return float(liquidity) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _consensus_matches_target(consensus: Any, target: float) -> bool:
+    if consensus is None:
+        return False
+    if isinstance(consensus, bool):
+        return False
+    if isinstance(consensus, (int, float)):
+        return abs(float(consensus) - target) < 1e-9
+    if isinstance(consensus, str) and consensus.strip():
+        try:
+            return abs(float(consensus) - target) < 1e-9
+        except ValueError:
+            return False
+    return False
+
+
 @dataclass(frozen=True)
 class TradingState:
     markets: list[dict[str, Any]]
@@ -57,22 +97,24 @@ def execute_trade(
     dry_run: bool,
     verbose: bool = True,
     log_bets: bool | None = None,
+    log_skip_substrings: tuple[str, ...] = (),
 ) -> TradeResult:
     show_bet = verbose if log_bets is None else log_bets
 
     if "id" not in market:
         raise ValueError("market missing id")
     mid = market["id"]
+    name = str(market.get("metricName") or "")
     trade_count = market.get("tradeCount")
-    if trade_count != 0:
-        if verbose:
-            print(f"Skip {mid}: already traded ({trade_count}).")
+    if not _trade_count_is_zero(trade_count):
+        if _wants_skip_log(verbose, name, log_skip_substrings):
+            print(f"Skip {mid}: already traded ({trade_count}).", flush=True)
         return TradeResult(traded=False, skipped=True)
 
     liq = market.get("liquidity")
-    if not (isinstance(liq, (int, float)) and liq > 0):
-        if verbose:
-            print(f"Skip {mid}: no liquidity.")
+    if not _liquidity_positive(liq):
+        if _wants_skip_log(verbose, name, log_skip_substrings):
+            print(f"Skip {mid}: no liquidity (liquidity={liq!r}).", flush=True)
         return TradeResult(traded=False, skipped=True)
 
     metric_id = market.get("metricId")
@@ -86,14 +128,19 @@ def execute_trade(
         float(market["rangeMax"]),
     )
     consensus = market.get("consensus")
-    if isinstance(consensus, (int, float)) and abs(float(consensus) - target_value) < 1e-9:
-        if verbose:
-            print(f"Skip {mid}: consensus already at target {target_value}.")
+    if _consensus_matches_target(consensus, target_value):
+        if _wants_skip_log(verbose, name, log_skip_substrings):
+            print(
+                f"Skip {mid}: consensus already at target {target_value} (current={consensus!r}).",
+                flush=True,
+            )
         return TradeResult(traded=False, skipped=True)
 
-    name = market.get("metricName", "")
     pre_consensus = market.get("consensus")
-    liq_display = float(liq) if isinstance(liq, (int, float)) else liq
+    try:
+        liq_display = float(liq)
+    except (TypeError, ValueError):
+        liq_display = liq
 
     if dry_run:
         if show_bet:
@@ -143,6 +190,7 @@ def run_untouched_on_markets(
     rate_limit_backoff_s: float = 65.0,
     should_stop: Callable[[], bool] | None = None,
     log_bets: bool | None = None,
+    log_skip_substrings: tuple[str, ...] = (),
 ) -> int:
     """Returns number of markets where a trade was placed (not dry-run skips)."""
     traded_count = 0
@@ -152,6 +200,7 @@ def run_untouched_on_markets(
         if not isinstance(market, dict):
             continue
         mid = market.get("id", "?")
+        mname = str(market.get("metricName") or "")
         try:
             result = execute_trade(
                 client,
@@ -161,11 +210,15 @@ def run_untouched_on_markets(
                 dry_run=dry_run,
                 verbose=verbose,
                 log_bets=log_bets,
+                log_skip_substrings=log_skip_substrings,
             )
             if result.traded:
                 traded_count += 1
                 if sleep_interruptible(post_trade_delay_s, should_stop):
                     return traded_count
+        except (TypeError, ValueError) as e:
+            print(f"Skip {mid} ({mname}): {e}", file=sys.stderr, flush=True)
+            continue
         except TelarchyApiError as e:
             msg = e.body if e.body else str(e)
             if e.status == 429:
@@ -178,10 +231,11 @@ def run_untouched_on_markets(
                     return traded_count
                 continue
             if e.status == 400 and "Trade too small" in msg:
-                if verbose:
+                if _wants_skip_log(verbose, mname, log_skip_substrings):
                     print(
                         f"Skip {mid}: trade too small (try raising MAX_BUDGET_PER_MARKET).",
                         file=sys.stderr,
+                        flush=True,
                     )
                 if sleep_interruptible(post_trade_delay_s, should_stop):
                     return traded_count

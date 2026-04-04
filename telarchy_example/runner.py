@@ -60,6 +60,13 @@ def main() -> None:
         f"Ctrl+C stops within ~0.25s)",
         flush=True,
     )
+    if rt.log_skip_metric_substrings:
+        print(
+            "  LOG_SKIPS_FOR_METRIC_SUBSTR: skip reasons print for matching metricName. "
+            "If a market never appears in logs, the API may omit it for this agent "
+            "(workspace metric trade permission groups).",
+            flush=True,
+        )
 
     try:
         first_poll = True
@@ -89,6 +96,7 @@ def main() -> None:
                     dry_run=rt.dry_run,
                     verbose=False,
                     log_bets=True,
+                    log_skip_substrings=rt.log_skip_metric_substrings,
                     post_trade_delay_s=post_delay,
                     rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
                     should_stop=stop.is_set,
