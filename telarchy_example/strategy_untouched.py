@@ -92,11 +92,15 @@ def execute_trade(
         return TradeResult(traded=False, skipped=True)
 
     name = market.get("metricName", "")
+    pre_consensus = market.get("consensus")
+    liq_display = float(liq) if isinstance(liq, (int, float)) else liq
+
     if dry_run:
         if show_bet:
             print(
                 f"Dry run {mid}: {name} -> target={target_value}, "
-                f"maxBudget={max_budget_per_market}",
+                f"maxBudget={max_budget_per_market}, "
+                f"current={pre_consensus}, liquidity={liq_display}",
                 flush=True,
             )
         return TradeResult(traded=False, skipped=True)
@@ -119,6 +123,7 @@ def execute_trade(
     if show_bet:
         print(
             f"Bet {mid}: {name} @ {target_date} -> target={target_value}, "
+            f"current={pre_consensus}, liquidity={liq_display}, "
             f"cost={cost}, consensus={cons}",
             flush=True,
         )
