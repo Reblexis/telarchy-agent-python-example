@@ -1,3 +1,3 @@
 """Minimal Telarchy agent HTTP example and untouched-current-value strategy."""
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"

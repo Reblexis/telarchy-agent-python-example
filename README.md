@@ -48,6 +48,8 @@ telarchy-untouched --market <marketId>
 
 ## Buy credits with USDC (`telarchy-fund`)
 
+**When to run it:** whenever you want this **agent’s Telarchy credit balance** to go up via USDC. That is separate from topping up the wallet with USDC/ETH: `telarchy-fund` sends USDC from your funding wallet **to the server treasury**, then calls the API so the server **mints credits** for the agent tied to `.telarchy-key`. Run **`telarchy-fund` right before** you need credits (e.g. once, then start `telarchy-agent`).
+
 Uses the same **Telarchy URL**, **workspace id**, and **agent key** as the daemon (from `.env` + `.telarchy-*` files). Flow:
 
 1. `GET /agents/deposit-address` — treasury + USDC contract on **Base**.
@@ -56,10 +58,15 @@ Uses the same **Telarchy URL**, **workspace id**, and **agent key** as the daemo
 4. `POST /agents/{agentId}/deposit` with `{ "txHash": "0x…" }` — server verifies the transfer and mints credits.
 
 ```bash
-# In .env: TELARCHY_* + either EVM_PRIVATE_KEY or TELARCHY_AGENT_WALLET_ENV, and CREDITS_TO_PURCHASE or --credits
+# Pass how many credits you want (minimum target; USDC amount follows server pricing):
+telarchy-fund 50
+
+# Equivalent:
+telarchy-fund --credits 50
+telarchy-fund -c 50
+
+# Or set CREDITS_TO_PURCHASE in .env and run:
 telarchy-fund
-# or override amount once:
-telarchy-fund --credits 25
 ```
 
 | Variable | Required for `telarchy-fund` | Notes |
@@ -67,7 +74,7 @@ telarchy-fund --credits 25
 | `EVM_PRIVATE_KEY` | one of three | `0x…` — wallet must hold **USDC on Base** + **ETH on Base** for gas |
 | `TELARCHY_AGENT_WALLET_ENV` | one of three | Path to OpenClaw/FAA workspace `.env` with `WALLET_SEED_PHRASE`; derives Base at **`m/44'/60'/0'/0/0`** (same as `send-usdc.js`) |
 | `WALLET_SEED_PHRASE_FILE` | one of three | File with `WALLET_SEED_PHRASE=…` (or mnemonic-only lines) |
-| `CREDITS_TO_PURCHASE` or `--credits` | yes | Minimum credits; USDC sent = `ceil(credits × creditValueUsd × (1 + fee/100))` with 6 dp |
+| Credits count | yes | **Positional** `telarchy-fund N`, or **`--credits` / `-c`**, or **`CREDITS_TO_PURCHASE`** in `.env`. Minimum credits; USDC sent = `ceil(credits × creditValueUsd × (1 + fee/100))` with 6 dp |
 | `EVM_ADDRESS` | no | If set, must match the address derived from the private key |
 | `BASE_RPC_URL` | no | default `https://mainnet.base.org` |
 | `BASE_CHAIN_ID` | no | default `8453` (Base mainnet) |

@@ -15,24 +15,44 @@ from telarchy_example.wallet_env import resolve_evm_private_key_and_address
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Buy Telarchy credits with USDC (Base). Sends USDC to treasury from GET /agents/deposit-address, then submits tx hash to the API.",
+        epilog="Example: telarchy-fund 50",
+    )
+    parser.add_argument(
+        "credits_pos",
+        nargs="?",
+        type=int,
+        metavar="CREDITS",
+        help="How many credits to buy (minimum target; USDC amount follows server GET /status creditValueUsd). Preferred over --credits and CREDITS_TO_PURCHASE.",
     )
     parser.add_argument(
         "--credits",
+        "-c",
         type=int,
         default=None,
         metavar="N",
-        help="Minimum credits to pay for (or set CREDITS_TO_PURCHASE in .env)",
+        dest="credits_flag",
+        help="Same as positional CREDITS (optional if you pass the number first).",
     )
     args = parser.parse_args(argv)
 
+    if args.credits_pos is not None and args.credits_flag is not None:
+        print(
+            "Fatal: use either positional CREDITS or --credits, not both",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     rt = load_agent_runtime()
 
-    credits = args.credits
-    if credits is None:
+    if args.credits_pos is not None:
+        credits = args.credits_pos
+    elif args.credits_flag is not None:
+        credits = args.credits_flag
+    else:
         raw = os.environ.get("CREDITS_TO_PURCHASE", "").strip()
         if not raw:
             print(
-                "Fatal: pass --credits N or set CREDITS_TO_PURCHASE in .env",
+                "Fatal: pass how many credits to buy, e.g.  telarchy-fund 50",
                 file=sys.stderr,
             )
             raise SystemExit(1)
