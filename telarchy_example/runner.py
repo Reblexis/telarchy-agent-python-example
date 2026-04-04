@@ -97,6 +97,7 @@ def main() -> None:
                     verbose=False,
                     log_bets=True,
                     log_skip_substrings=rt.log_skip_metric_substrings,
+                    seed_virgin_midpoint=rt.seed_virgin_midpoint,
                     post_trade_delay_s=post_delay,
                     rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
                     should_stop=stop.is_set,

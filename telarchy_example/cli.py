@@ -74,6 +74,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             post_trade_delay_s=post_delay,
             rate_limit_backoff_s=rt.trade_rate_limit_backoff_seconds,
             log_skip_substrings=rt.log_skip_metric_substrings,
+            seed_virgin_midpoint=rt.seed_virgin_midpoint,
         )
 
         print("Dry run complete." if dry_run else f"Placed {traded_count} trade(s).")

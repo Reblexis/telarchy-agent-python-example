@@ -1,7 +1,10 @@
 """
 Deterministic strategy: untouched markets only, target = current metric total.
 
-Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` in fully-autonomous-agents.
+When the metric equals the virgin LMSR midpoint, targetValue trades are size zero; optional seed uses
+POST {direction, amount} (budget) to buy ``higher`` shares so the market records a trade.
+
+Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` except for that seed path.
 """
 
 from __future__ import annotations
@@ -117,6 +120,7 @@ def execute_trade(
     verbose: bool = True,
     log_bets: bool | None = None,
     log_skip_substrings: tuple[str, ...] = (),
+    seed_virgin_midpoint: bool = True,
 ) -> TradeResult:
     show_bet = verbose if log_bets is None else log_bets
 
@@ -155,21 +159,56 @@ def execute_trade(
             )
         return TradeResult(traded=False, skipped=True)
 
-    virgin_mid, implied_mid = _virgin_midpoint_equals_target(market, target_value)
-    if virgin_mid and implied_mid is not None:
-        if show_bet or _wants_skip_log(verbose, name, log_skip_substrings):
-            print(
-                f"Skip {mid}: no trades yet (consensus=null); implied midpoint={implied_mid} "
-                f"equals target={target_value} — LMSR move is zero (server: Trade too small).",
-                flush=True,
-            )
-        return TradeResult(traded=False, skipped=True)
-
     pre_consensus = market.get("consensus")
     try:
         liq_display = float(liq)
     except (TypeError, ValueError):
         liq_display = liq
+    target_date = str(market.get("targetDate") or "")
+
+    virgin_mid, implied_mid = _virgin_midpoint_equals_target(market, target_value)
+    if virgin_mid and implied_mid is not None:
+        if dry_run:
+            if show_bet:
+                print(
+                    f"Dry run {mid}: {name} @ {target_date} -> virgin midpoint={implied_mid} "
+                    f"equals target={target_value}; would SEED buy higher "
+                    f"budget={max_budget_per_market} (SEED_VIRGIN_MIDPOINT)",
+                    flush=True,
+                )
+            return TradeResult(traded=False, skipped=True)
+        if not seed_virgin_midpoint:
+            if show_bet or _wants_skip_log(verbose, name, log_skip_substrings):
+                print(
+                    f"Skip {mid}: midpoint={implied_mid} equals target={target_value} "
+                    f"(zero targetValue trade); set SEED_VIRGIN_MIDPOINT=1 to open with directional buy.",
+                    flush=True,
+                )
+            return TradeResult(traded=False, skipped=True)
+        result = client.request(
+            "POST",
+            "/predictions/trade",
+            {
+                "marketId": mid,
+                "direction": "higher",
+                "amount": max_budget_per_market,
+            },
+        )
+        if not isinstance(result, dict):
+            raise TypeError("expected dict from POST /predictions/trade")
+        cost = result.get("cost")
+        cons = result.get("consensus")
+        shr = result.get("shares")
+        if show_bet:
+            print(
+                f"Bet {mid}: {name} @ {target_date} -> SEED higher "
+                f"(midpoint deadlock: target={target_value} mid={implied_mid}), "
+                f"budget={max_budget_per_market}, current={pre_consensus}, liquidity={liq_display}, "
+                f"shares={shr}, cost={cost}, consensus={cons}",
+                flush=True,
+            )
+        traded_cost = float(cost) if isinstance(cost, (int, float)) else 0.0
+        return TradeResult(traded=True, skipped=False, cost=traded_cost)
 
     if dry_run:
         if show_bet:
@@ -195,7 +234,6 @@ def execute_trade(
 
     cost = result.get("cost")
     cons = result.get("consensus")
-    target_date = market.get("targetDate", "")
     if show_bet:
         print(
             f"Bet {mid}: {name} @ {target_date} -> target={target_value}, "
@@ -220,6 +258,7 @@ def run_untouched_on_markets(
     should_stop: Callable[[], bool] | None = None,
     log_bets: bool | None = None,
     log_skip_substrings: tuple[str, ...] = (),
+    seed_virgin_midpoint: bool = True,
 ) -> int:
     """Returns number of markets where a trade was placed (not dry-run skips)."""
     traded_count = 0
@@ -240,6 +279,7 @@ def run_untouched_on_markets(
                 verbose=verbose,
                 log_bets=log_bets,
                 log_skip_substrings=log_skip_substrings,
+                seed_virgin_midpoint=seed_virgin_midpoint,
             )
             if result.traded:
                 traded_count += 1

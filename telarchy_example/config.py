@@ -39,6 +39,7 @@ class AgentRuntime:
     trade_post_delay_seconds: float
     trade_rate_limit_backoff_seconds: float
     log_skip_metric_substrings: tuple[str, ...]
+    seed_virgin_midpoint: bool
 
 
 def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
@@ -68,6 +69,9 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
         s.strip().lower() for s in skip_raw.split(",") if s.strip()
     )
 
+    seed_raw = os.environ.get("SEED_VIRGIN_MIDPOINT", "1").strip().lower()
+    seed_virgin = seed_raw not in ("0", "false", "no", "off")
+
     agent_id, api_key = resolve_or_register(base, url)
 
     return AgentRuntime(
@@ -81,4 +85,5 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
         trade_post_delay_seconds=trade_post_delay,
         trade_rate_limit_backoff_seconds=backoff,
         log_skip_metric_substrings=log_skip_substrs,
+        seed_virgin_midpoint=seed_virgin,
     )
