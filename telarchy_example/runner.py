@@ -116,6 +116,11 @@ def main() -> None:
 
             if stop.is_set():
                 break
+            print(
+                f"  Next poll in {rt.poll_interval_seconds:g}s (same markets re-fetched; "
+                f"only untouched / out-of-consensus markets trade)…",
+                flush=True,
+            )
             sleep_interruptible(rt.poll_interval_seconds, stop.is_set)
     finally:
         client.close()
