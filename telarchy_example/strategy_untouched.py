@@ -56,6 +56,25 @@ def _consensus_matches_target(consensus: Any, target: float) -> bool:
     return False
 
 
+def _virgin_midpoint_equals_target(market: dict[str, Any], target_value: float) -> tuple[bool, float | None]:
+    """
+    When the API reports consensus=null, the server still uses midpoint (rangeMin+rangeMax)/2 as
+    the implicit current value for [0,0] shares (see metrics-tracker betTowardsValue). If the
+    metric target equals that within 0.01 credits, the trade size is 0 → HTTP 400 Trade too small.
+    """
+    if market.get("consensus") is not None:
+        return False, None
+    try:
+        rmin = float(market["rangeMin"])
+        rmax = float(market["rangeMax"])
+    except (KeyError, TypeError, ValueError):
+        return False, None
+    mid = rmin + (rmax - rmin) / 2
+    if abs(float(target_value) - mid) < 0.01:
+        return True, mid
+    return False, None
+
+
 @dataclass(frozen=True)
 class TradingState:
     markets: list[dict[str, Any]]
@@ -132,6 +151,16 @@ def execute_trade(
         if _wants_skip_log(verbose, name, log_skip_substrings):
             print(
                 f"Skip {mid}: consensus already at target {target_value} (current={consensus!r}).",
+                flush=True,
+            )
+        return TradeResult(traded=False, skipped=True)
+
+    virgin_mid, implied_mid = _virgin_midpoint_equals_target(market, target_value)
+    if virgin_mid and implied_mid is not None:
+        if show_bet or _wants_skip_log(verbose, name, log_skip_substrings):
+            print(
+                f"Skip {mid}: no trades yet (consensus=null); implied midpoint={implied_mid} "
+                f"equals target={target_value} — LMSR move is zero (server: Trade too small).",
                 flush=True,
             )
         return TradeResult(traded=False, skipped=True)
