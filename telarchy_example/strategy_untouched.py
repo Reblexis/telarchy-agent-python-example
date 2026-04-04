@@ -2,9 +2,9 @@
 Deterministic strategy: untouched markets only, target = current metric total.
 
 When the metric equals the virgin LMSR midpoint, targetValue trades are size zero; optional seed runs
-minimal-credit ``higher`` then ``lower`` budget buys (each capped at half of ``MAX_BUDGET_PER_MARKET``),
-probing from a tiny budget upward until the server accepts the trade, so consensus stays near the
-midpoint for as little spend as possible.
+minimal ``higher`` then ``lower`` budget buys (each capped at half of ``MAX_BUDGET_PER_MARKET``), then
+a ``targetValue`` nudge spends any remaining budget to pull consensus back to the metric (sequential
+one-sided buys slightly unbalance shares, so consensus can sit at e.g. 498.5 until the nudge).
 
 Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` except for that seed path.
 """
@@ -217,8 +217,8 @@ def execute_trade(
                 cap = max_budget_per_market / 2.0
                 print(
                     f"Dry run {mid}: {name} @ {target_date} -> virgin midpoint={implied_mid} "
-                    f"equals target={target_value}; would SEED minimal higher then lower "
-                    f"(per-leg budget cap={cap}, SEED_VIRGIN_MIDPOINT)",
+                    f"equals target={target_value}; would SEED minimal higher+lower "
+                    f"(per-leg cap={cap}) then targetValue nudge (remaining budget, SEED_VIRGIN_MIDPOINT)",
                     flush=True,
                 )
             return TradeResult(traded=False, skipped=True)
@@ -236,20 +236,67 @@ def execute_trade(
         res_lo = _minimal_directional_buy(client, mid, "lower", leg_cap)
         c_hi = res_hi.get("cost")
         c_lo = res_lo.get("cost")
-        cons = res_lo.get("consensus")
         sh_hi = res_hi.get("shares")
         sh_lo = res_lo.get("shares")
-        cost_sum = 0.0
+        cost_seed = 0.0
         for c in (c_hi, c_lo):
             if isinstance(c, (int, float)):
-                cost_sum += float(c)
+                cost_seed += float(c)
+        consensus_after_seed = res_lo.get("consensus")
+        remaining = max_budget_per_market - cost_seed
+        res_nudge: dict[str, Any] | None = None
+        cons_f: float | None = None
+        if isinstance(consensus_after_seed, (int, float)):
+            cons_f = float(consensus_after_seed)
+        if (
+            remaining > 1e-12
+            and cons_f is not None
+            and abs(cons_f - float(target_value)) > 0.005
+        ):
+            try:
+                res_nudge = client.request(
+                    "POST",
+                    "/predictions/trade",
+                    {
+                        "marketId": mid,
+                        "targetValue": target_value,
+                        "maxBudget": remaining,
+                    },
+                )
+            except TelarchyApiError as e:
+                msg = e.body if e.body else str(e)
+                if e.status == 400 and "Trade too small" in msg:
+                    if show_bet:
+                        print(
+                            f"Note {mid}: post-seed nudge skipped (Trade too small), "
+                            f"consensus_after_seed={cons_f}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                else:
+                    raise
+        cost_nudge = 0.0
+        consensus_final: Any = consensus_after_seed
+        nudge_note = ""
+        if isinstance(res_nudge, dict):
+            c_n = res_nudge.get("cost")
+            if isinstance(c_n, (int, float)):
+                cost_nudge = float(c_n)
+            consensus_final = res_nudge.get("consensus", consensus_final)
+            sh_n = res_nudge.get("shares")
+            nudge_note = (
+                f" | nudge targetValue maxBudget={remaining} shares={sh_n} cost={c_n} "
+                f"-> consensus={consensus_final}"
+            )
+        cost_sum = cost_seed + cost_nudge
         if show_bet:
             print(
                 f"Bet {mid}: {name} @ {target_date} -> SEED minimal higher+lower "
                 f"(midpoint deadlock: target={target_value} mid={implied_mid}), "
                 f"per_leg_cap={leg_cap}, current={pre_consensus}, liquidity={liq_display}, "
                 f"higher shares={sh_hi} cost={c_hi} | lower shares={sh_lo} cost={c_lo} | "
-                f"total_cost={cost_sum} consensus={cons}",
+                f"seed_cost={cost_seed} consensus_after_seed={consensus_after_seed}{nudge_note} | "
+                f"total_cost={cost_sum}",
                 flush=True,
             )
         return TradeResult(traded=True, skipped=False, cost=cost_sum)
