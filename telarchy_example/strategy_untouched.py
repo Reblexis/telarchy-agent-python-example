@@ -1,9 +1,10 @@
 """
 Deterministic strategy: untouched markets only, target = current metric total.
 
-When the metric equals the virgin LMSR midpoint, targetValue trades are size zero; optional seed splits
-``MAX_BUDGET_PER_MARKET`` across a ``higher`` then ``lower`` budget buy so consensus stays near the
-midpoint while the market records trades.
+When the metric equals the virgin LMSR midpoint, targetValue trades are size zero; optional seed runs
+minimal-credit ``higher`` then ``lower`` budget buys (each capped at half of ``MAX_BUDGET_PER_MARKET``),
+probing from a tiny budget upward until the server accepts the trade, so consensus stays near the
+midpoint for as little spend as possible.
 
 Parity with `agents/trader/scripts/telarchy-untouched-current-value.cjs` except for that seed path.
 """
@@ -78,6 +79,47 @@ def _virgin_midpoint_equals_target(market: dict[str, Any], target_value: float) 
     if abs(float(target_value) - mid) < 0.01:
         return True, mid
     return False, None
+
+
+def _minimal_directional_buy(
+    client: TelarchyClient,
+    market_id: Any,
+    direction: str,
+    budget_cap: float,
+) -> dict[str, Any]:
+    """Smallest ``amount`` (credit budget) ≤ ``budget_cap`` that clears Trade too small; doubles on 400."""
+    if budget_cap <= 0:
+        raise ValueError("budget_cap must be positive")
+    b = max(1e-12, min(budget_cap / 1024, budget_cap))
+    last_small: TelarchyApiError | None = None
+    for _ in range(48):
+        try:
+            r = client.request(
+                "POST",
+                "/predictions/trade",
+                {
+                    "marketId": market_id,
+                    "direction": direction,
+                    "amount": b,
+                },
+            )
+        except TelarchyApiError as e:
+            msg = e.body if e.body else str(e)
+            if e.status == 400 and "Trade too small" in msg:
+                last_small = e
+                if b >= budget_cap - 1e-15:
+                    raise
+                nb = min(b * 2.0, budget_cap)
+                if nb <= b:
+                    nb = budget_cap
+                b = nb
+                time.sleep(0.05)
+                continue
+            raise
+        if isinstance(r, dict):
+            return r
+        raise TypeError("expected dict from POST /predictions/trade")
+    raise RuntimeError("minimal directional buy: iteration limit") from last_small
 
 
 @dataclass(frozen=True)
@@ -172,12 +214,11 @@ def execute_trade(
     if virgin_mid and implied_mid is not None:
         if dry_run:
             if show_bet:
-                half = max_budget_per_market / 2.0
-                rest = max_budget_per_market - half
+                cap = max_budget_per_market / 2.0
                 print(
                     f"Dry run {mid}: {name} @ {target_date} -> virgin midpoint={implied_mid} "
-                    f"equals target={target_value}; would SEED higher budget={half}, "
-                    f"lower budget={rest} (keep ~midpoint, SEED_VIRGIN_MIDPOINT)",
+                    f"equals target={target_value}; would SEED minimal higher then lower "
+                    f"(per-leg budget cap={cap}, SEED_VIRGIN_MIDPOINT)",
                     flush=True,
                 )
             return TradeResult(traded=False, skipped=True)
@@ -189,31 +230,10 @@ def execute_trade(
                     flush=True,
                 )
             return TradeResult(traded=False, skipped=True)
-        half_budget = max_budget_per_market / 2.0
-        lower_budget = max_budget_per_market - half_budget
-        res_hi = client.request(
-            "POST",
-            "/predictions/trade",
-            {
-                "marketId": mid,
-                "direction": "higher",
-                "amount": half_budget,
-            },
-        )
-        if not isinstance(res_hi, dict):
-            raise TypeError("expected dict from POST /predictions/trade (seed higher)")
+        leg_cap = max_budget_per_market / 2.0
+        res_hi = _minimal_directional_buy(client, mid, "higher", leg_cap)
         time.sleep(0.25)
-        res_lo = client.request(
-            "POST",
-            "/predictions/trade",
-            {
-                "marketId": mid,
-                "direction": "lower",
-                "amount": lower_budget,
-            },
-        )
-        if not isinstance(res_lo, dict):
-            raise TypeError("expected dict from POST /predictions/trade (seed lower)")
+        res_lo = _minimal_directional_buy(client, mid, "lower", leg_cap)
         c_hi = res_hi.get("cost")
         c_lo = res_lo.get("cost")
         cons = res_lo.get("consensus")
@@ -225,9 +245,9 @@ def execute_trade(
                 cost_sum += float(c)
         if show_bet:
             print(
-                f"Bet {mid}: {name} @ {target_date} -> SEED higher+lower "
+                f"Bet {mid}: {name} @ {target_date} -> SEED minimal higher+lower "
                 f"(midpoint deadlock: target={target_value} mid={implied_mid}), "
-                f"budgets={half_budget}+{lower_budget}, current={pre_consensus}, liquidity={liq_display}, "
+                f"per_leg_cap={leg_cap}, current={pre_consensus}, liquidity={liq_display}, "
                 f"higher shares={sh_hi} cost={c_hi} | lower shares={sh_lo} cost={c_lo} | "
                 f"total_cost={cost_sum} consensus={cons}",
                 flush=True,
