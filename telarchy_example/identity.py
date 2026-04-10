@@ -14,10 +14,13 @@ def _register_url(base: str) -> str:
     return f"{base.rstrip('/')}/agents/register"
 
 
-def _try_register(telarchy_url: str, agent_id: str) -> dict | None:
+def _try_register(telarchy_url: str, agent_id: str, workspace_id: str | None = None) -> dict | None:
     """POST /agents/register. Returns JSON body, or None if agent id already taken (409)."""
     url = _register_url(telarchy_url)
-    resp = httpx.post(url, json={"agentId": agent_id}, timeout=60.0)
+    body: dict[str, str] = {"agentId": agent_id}
+    if workspace_id:
+        body["workspaceId"] = workspace_id
+    resp = httpx.post(url, json=body, timeout=60.0)
     if resp.status_code == 409:
         return None
     if resp.status_code >= 400:
@@ -27,7 +30,7 @@ def _try_register(telarchy_url: str, agent_id: str) -> dict | None:
     return resp.json()
 
 
-def resolve_or_register(base: Path, telarchy_url: str) -> tuple[str, str]:
+def resolve_or_register(base: Path, telarchy_url: str, workspace_id: str | None = None) -> tuple[str, str]:
     """
     Credentials resolution order:
     1. `.telarchy-id` + `.telarchy-key` in `base`
@@ -56,7 +59,7 @@ def resolve_or_register(base: Path, telarchy_url: str) -> tuple[str, str]:
         return env_agent, key_file.read_text(encoding="utf-8").strip()
 
     if env_agent and not key_file.is_file():
-        body = _try_register(telarchy_url, env_agent)
+        body = _try_register(telarchy_url, env_agent, workspace_id)
         if body is None:
             raise RuntimeError(
                 f'Agent id "{env_agent}" is already registered but no key file was found at {key_file}. '
@@ -75,7 +78,7 @@ def resolve_or_register(base: Path, telarchy_url: str) -> tuple[str, str]:
 
     for _ in range(12):
         agent_id = f"py-auto-{uuid.uuid4().hex[:14]}"
-        body = _try_register(telarchy_url, agent_id)
+        body = _try_register(telarchy_url, agent_id, workspace_id)
         if body is None:
             continue
         _validate_register_body(body)

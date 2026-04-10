@@ -78,7 +78,7 @@ def load_agent_runtime(cwd: Path | None = None) -> AgentRuntime:
     retrade_raw = os.environ.get("RETRADE_OUT_OF_CONSENSUS", "0").strip().lower()
     retrade = retrade_raw in ("1", "true", "yes", "on")
 
-    agent_id, api_key = resolve_or_register(base, url)
+    agent_id, api_key = resolve_or_register(base, url, ws)
 
     return AgentRuntime(
         telarchy_url=url,
